@@ -1,0 +1,71 @@
+version: '3'
+services:
+  wsgi-server:
+    build:
+      context: .
+      target: wsgi-server
+    environment:
+      APP_DOMAIN: localhost:9000
+      WORKER_TIMEOUT: 180
+      DJANGO_SUPERUSER_USERNAME: admin # default superuser name
+      DJANGO_SUPERUSER_PASSWORD: password # default superuser password
+      DJANGO_SUPERUSER_EMAIL: admin@example.com # default superuser email
+      ACCOUNT_EMAIL_VERIFICATION: ${ACCOUNT_EMAIL_VERIFICATION:-none} # Determines the e-mail verification method during signup – choose one of "none", "optional", or "mandatory". Default is "optional". If you don't need to verify the email, you can set it to "none".
+      DB_URL: ${DB_URL:-sqlite:///db.sqlite3}
+      SERVICE_TOKEN: chat-service-secret-key
+      KAFKA_BOOTSTRAP_SERVERS: chat-service-kafka:29092
+      ENABLE_KAFKA: true
+      MOCK_AUTH: ${MOCK_AUTH:-true}
+    ports:
+      - '8003:8010'  # Изменили порт на 8003 как указано в документе
+    depends_on:
+      - chat-service-kafka
+    networks:
+        - chatgpt-ui_network
+  web-server:
+    build:
+      context: .
+    environment:
+      - BACKEND_URL=http://wsgi-server:8010
+    ports:
+      - '9000:80'
+    depends_on:
+      - wsgi-server
+    networks:
+      - chatgpt-ui_network
+
+  # Kafka для chat-service (изолированный)
+  chat-service-zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: chat-service-zookeeper
+    container_name: chat-service-zookeeper
+    ports:
+      - "2184:2181"  # Уникальный порт для chat-service
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - chatgpt-ui_network
+
+  chat-service-kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: chat-service-kafka
+    container_name: chat-service-kafka
+    depends_on:
+      - chat-service-zookeeper
+    ports:
+      - "29095:29092"  # Уникальный порт для chat-service
+      - "9095:9092"    # Уникальный порт для chat-service
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'chat-service-zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://chat-service-kafka:29092,PLAINTEXT_HOST://localhost:9095
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    networks:
+      - chatgpt-ui_network
+
+networks:
+  chatgpt-ui_network:
+    driver: bridge
