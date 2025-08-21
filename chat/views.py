@@ -71,7 +71,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         active_org_id = getattr(self.request, 'active_org_id', None)
         queryset = Conversation.objects.none()
         if user_sub:
-            queryset = Conversation.objects.filter(user_sub=user_sub)
+            queryset = Conversation.objects.filter(sub=user_sub)
             if active_org_id:
                 queryset = queryset.filter(org_id=active_org_id)
             queryset = queryset.order_by('-created_at')
@@ -81,8 +81,62 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Создаем запись, используя внешний идентификатор и организацию
         user_sub = getattr(self.request, 'user_id', None)
         if not user_sub:
-            raise ValidationError({"error": "X-User-Id header is required"})
-        serializer.save(user_sub=user_sub, org_id=getattr(self.request, 'active_org_id', None))
+            raise ValidationError({"error": "Authentication required. X-User-Data header with valid JWT token is required"})
+        
+        # Получаем следующий conversation_id для пользователя
+        # Ищем максимальный conversation_id только для этого пользователя
+        last_conversation = Conversation.objects.filter(sub=user_sub).order_by('-conversation_id').first()
+        next_conversation_id = 1 if not last_conversation else last_conversation.conversation_id + 1
+        
+        serializer.save(
+            sub=user_sub, 
+            org_id=getattr(self.request, 'active_org_id', None),
+            conversation_id=next_conversation_id
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        """Получаем беседу по conversation_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        conversation_id = kwargs.get('pk')
+        try:
+            conversation = Conversation.objects.get(sub=user_sub, conversation_id=conversation_id)
+            serializer = self.get_serializer(conversation)
+            return Response(serializer.data)
+        except Conversation.DoesNotExist:
+            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, *args, **kwargs):
+        """Обновляем беседу по conversation_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        conversation_id = kwargs.get('pk')
+        try:
+            conversation = Conversation.objects.get(sub=user_sub, conversation_id=conversation_id)
+            serializer = self.get_serializer(conversation, data=request.data, partial=kwargs.get('partial', False))
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        except Conversation.DoesNotExist:
+            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, *args, **kwargs):
+        """Удаляем беседу по conversation_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        conversation_id = kwargs.get('pk')
+        try:
+            conversation = Conversation.objects.get(sub=user_sub, conversation_id=conversation_id)
+            conversation.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Conversation.DoesNotExist:
+            return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=['delete'])
     def delete_all(self, request):
@@ -103,7 +157,7 @@ class MessageViewSet(viewsets.ModelViewSet):
         active_org_id = getattr(self.request, 'active_org_id', None)
         queryset = Message.objects.none()
         if user_sub:
-            queryset = Message.objects.filter(user_sub=user_sub)
+            queryset = Message.objects.filter(sub=user_sub)
             if active_org_id:
                 queryset = queryset.filter(conversation__org_id=active_org_id)
             queryset = queryset.order_by('-created_at')
@@ -112,11 +166,25 @@ class MessageViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(conversation_id=conversationId).order_by('created_at')
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Используем внешний sub из middleware
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required. X-User-Data header with valid JWT token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.validated_data['sub'] = user_sub
+
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         user_sub = getattr(self.request, 'user_id', None)
         if not user_sub:
-            raise ValidationError({"error": "X-User-Id header is required"})
-        serializer.save(user_sub=user_sub)
+            raise ValidationError({"error": "Authentication required. X-User-Data header with valid JWT token is required"})
+        serializer.save(sub=user_sub)
 
 
 class PromptViewSet(viewsets.ModelViewSet):
@@ -127,7 +195,7 @@ class PromptViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user_sub = getattr(self.request, 'user_id', None)
         if user_sub:
-            return Prompt.objects.filter(user_sub=user_sub).order_by('-created_at')
+            return Prompt.objects.filter(sub=user_sub).order_by('-created_at')
         else:
             return Prompt.objects.none()
 
@@ -135,11 +203,11 @@ class PromptViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Используем внешний user_sub из middleware
+        # Используем внешний sub из middleware
         user_sub = getattr(request, 'user_id', None)
         if not user_sub:
-            return Response({"error": "X-User-Id header is required"}, status=status.HTTP_400_BAD_REQUEST)
-        serializer.validated_data['user_sub'] = user_sub
+            return Response({"error": "Authentication required. X-User-Data header with valid JWT token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.validated_data['sub'] = user_sub
 
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
@@ -161,7 +229,7 @@ class EmbeddingDocumentViewSet(viewsets.ModelViewSet):
         user_sub = getattr(self.request, 'user_id', None)
         active_org_id = getattr(self.request, 'active_org_id', None)
         if user_sub:
-            qs = EmbeddingDocument.objects.filter(user_sub=user_sub)
+            qs = EmbeddingDocument.objects.filter(sub=user_sub)
             if active_org_id:
                 qs = qs.filter(org_id=active_org_id)
             return qs.order_by('-created_at')
@@ -172,11 +240,11 @@ class EmbeddingDocumentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Используем внешний user_sub/org_id из middleware
+        # Используем внешний sub/org_id из middleware
         user_sub = getattr(request, 'user_id', None)
         if not user_sub:
-            return Response({"error": "X-User-Id header is required"}, status=status.HTTP_400_BAD_REQUEST)
-        serializer.validated_data['user_sub'] = user_sub
+            return Response({"error": "Authentication required. X-User-Data header with valid JWT token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.validated_data['sub'] = user_sub
         serializer.validated_data['org_id'] = getattr(request, 'active_org_id', None)
 
         self.perform_create(serializer)

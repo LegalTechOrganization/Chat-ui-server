@@ -5,21 +5,24 @@ from .models import Conversation, Message, Prompt, EmbeddingDocument, Setting
 class ConversationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conversation
-        fields = ['id', 'topic', 'created_at']
+        fields = ['id', 'sub', 'org_id', 'conversation_id', 'topic', 'created_at', 'updated_at']
+        read_only_fields = ('sub', 'org_id', 'conversation_id')
 
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
-        fields = ['id', 'message', 'is_bot', 'message_type', 'embedding_message_doc', 'created_at']
+        fields = ['id', 'sub', 'conversation', 'message', 'is_bot', 'message_type', 'embedding_message_doc', 'messages', 'tokens', 'created_at']
+        read_only_fields = ('sub',)
 
 
 class PromptSerializer(serializers.ModelSerializer):
 
-    prompt = serializers.CharField(trim_whitespace=False, allow_blank=True)
+    content = serializers.CharField(trim_whitespace=False, allow_blank=True)
 
     class Meta:
         model = Prompt
-        fields = ['id', 'title', 'prompt', 'created_at', 'updated_at']
+        fields = ['id', 'sub', 'title', 'content', 'created_at']
+        read_only_fields = ('sub',)
 
 
 class EmbeddingDocumentSerializer(serializers.ModelSerializer):
@@ -27,8 +30,8 @@ class EmbeddingDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         ''' select fields'''
         model = EmbeddingDocument
-        fields = ['id', 'title', 'created_at']
-        read_only_fields = ('faiss_store', 'created_at')
+        fields = ['id', 'sub', 'org_id', 'title', 'created_at']
+        read_only_fields = ('sub', 'org_id', 'faiss_store', 'created_at')
 
 
 class SettingSerializer(serializers.ModelSerializer):

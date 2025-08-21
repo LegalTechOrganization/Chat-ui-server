@@ -1,29 +1,5 @@
-import logging
 from django.db import models
-
-logger = logging.getLogger(__name__)
-
-
-class EmbeddingDocument(models.Model):
-    """
-    Модель документа для эмбеддинга, адаптированная под использование sub как уникального идентификатора пользователя.
-    """
-    id = models.AutoField(primary_key=True)
-    sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
-    org_id = models.CharField(max_length=36, null=True, blank=True, db_index=True, help_text="Идентификатор организации")
-    title = models.CharField(max_length=255, help_text="Заголовок документа")
-    faiss_store = models.BinaryField(help_text="FAISS векторное хранилище")
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        db_table = 'embedding_documents'
-        indexes = [
-            models.Index(fields=['sub', 'created_at']),
-            models.Index(fields=['sub', 'org_id']),
-        ]
-
-    def __str__(self):
-        return f"Document {self.id} - {self.title} (sub: {self.sub})"
+from django.utils import timezone
 
 
 class Conversation(models.Model):
@@ -34,7 +10,6 @@ class Conversation(models.Model):
     id = models.AutoField(primary_key=True)
     sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
     org_id = models.CharField(max_length=36, null=True, blank=True, db_index=True, help_text="Идентификатор организации")
-    conversation_id = models.IntegerField(default=0, help_text="Порядковый номер беседы для пользователя")
     topic = models.CharField(max_length=255, help_text="Тема разговора")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -44,7 +19,6 @@ class Conversation(models.Model):
         indexes = [
             models.Index(fields=['sub', 'created_at']),
             models.Index(fields=['sub', 'org_id']),
-            models.Index(fields=['sub', 'conversation_id']),
         ]
 
     def __str__(self):
@@ -98,6 +72,28 @@ class Prompt(models.Model):
         return f"Prompt {self.id} - {self.title} (sub: {self.sub})"
 
 
+class EmbeddingDocument(models.Model):
+    """
+    Модель документа для эмбеддинга, адаптированная под использование sub как уникального идентификатора пользователя.
+    """
+    id = models.AutoField(primary_key=True)
+    sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
+    org_id = models.CharField(max_length=36, null=True, blank=True, db_index=True, help_text="Идентификатор организации")
+    title = models.CharField(max_length=255, help_text="Заголовок документа")
+    faiss_store = models.BinaryField(help_text="FAISS векторное хранилище")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'embedding_documents'
+        indexes = [
+            models.Index(fields=['sub', 'created_at']),
+            models.Index(fields=['sub', 'org_id']),
+        ]
+
+    def __str__(self):
+        return f"Document {self.id} - {self.title} (sub: {self.sub})"
+
+
 class Setting(models.Model):
     """
     Модель настроек системы.
@@ -117,7 +113,7 @@ class Setting(models.Model):
 
 class TokenUsage(models.Model):
     """
-    Модель использования токенов, адаптированная под использование sub как уникальный идентификатор пользователя.
+    Модель использования токенов, адаптированная под использование sub как уникального идентификатора пользователя.
     Аналогично balance_transactions в Tarrification.
     """
     id = models.AutoField(primary_key=True)

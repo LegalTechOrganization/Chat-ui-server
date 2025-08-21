@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: chat-service-postgres
+    environment:
+      POSTGRES_DB: chat_service_db
+      POSTGRES_USER: chat_service_user
+      POSTGRES_PASSWORD: chat_service_password
+    ports:
+      - "5457:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - chat-network
+
+  wsgi-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: chat-service-wsgi-postgres
+    environment:
+      - DJANGO_SETTINGS_MODULE=chatgpt_ui_server.settings_postgres
+      - DATABASE_URL=postgresql://chat_service_user:chat_service_password@postgres:5432/chat_service_db
+      - SERVICE_TOKEN=chat-service-secret-key
+      - KAFKA_BOOTSTRAP_SERVERS=chat-service-kafka:29092
+      - ENABLE_KAFKA=true
+      - MOCK_AUTH=true
+    ports:
+      - "8003:8010"
+    depends_on:
+      - postgres
+      - chat-service-kafka
+    networks:
+      - chat-network
+    volumes:
+      - ./:/app
+
+  chat-service-zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: chat-service-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2184
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2184:2184"
+    networks:
+      - chat-network
+
+  chat-service-kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: chat-service-kafka
+    depends_on:
+      - chat-service-zookeeper
+    ports:
+      - "9095:9095"
+      - "29095:29095"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: chat-service-zookeeper:2184
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://chat-service-kafka:29092,PLAINTEXT_HOST://localhost:9095
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - chat-network
+
+volumes:
+  postgres_data:
+
+networks:
+  chat-network:
+    driver: bridge

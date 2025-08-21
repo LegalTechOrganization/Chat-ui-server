@@ -13,7 +13,6 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-# to delete: admin site imports (если админка не нужна)
 from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
@@ -56,7 +55,7 @@ def test_conversations(request):
         import json
         
         if request.method == 'GET':
-            conversations = Conversation.objects.filter(user_sub=getattr(request, 'user_id', None)).order_by('-created_at')
+            conversations = Conversation.objects.filter(sub=getattr(request, 'user_id', None)).order_by('-created_at')
             conversation_list = []
             for conv in conversations:
                 conversation_list.append({
@@ -70,7 +69,7 @@ def test_conversations(request):
             data = json.loads(request.body)
             topic = data.get('topic', 'New Conversation')
             conversation = Conversation.objects.create(
-                user_sub=getattr(request, 'user_id', None),
+                sub=getattr(request, 'user_id', None),
                 org_id=getattr(request, 'active_org_id', None),
                 topic=topic
             )

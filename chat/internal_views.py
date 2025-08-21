@@ -18,15 +18,7 @@ from .kafka_service import kafka_service
 logger = logging.getLogger(__name__)
 
 
-def verify_internal_key(request):
-    """Проверка внутреннего ключа Gateway"""
-    internal_key = request.headers.get('x-internal-key')
-    expected_key = os.getenv('SERVICE_TOKEN', 'chat-service-secret-key')
-    
-    if internal_key != expected_key:
-        logger.warning("❌ Invalid internal key from %s", request.META.get('REMOTE_ADDR'))
-        return False
-    return True
+from .auth_utils import verify_internal_key, verify_gateway_auth
 
 
 def extract_user_data(request):
@@ -35,11 +27,17 @@ def extract_user_data(request):
     if not user_data_header:
         return None
     
-    try:
-        user_data = json.loads(user_data_header)
-        # Возвращаем весь объект user_data, а не только jwt_token
-        return user_data
-    except (json.JSONDecodeError, AttributeError):
+    # Используем новую систему аутентификации
+    auth_data = verify_gateway_auth(user_data_header)
+    if auth_data.is_valid:
+        return {
+            "user_id": auth_data.user_id,
+            "active_org_id": auth_data.active_org_id,
+            "user_email": auth_data.user_email,
+            "user_roles": auth_data.user_roles,
+            "jwt_payload": auth_data.jwt_payload
+        }
+    else:
         logger.warning("⚠️ Invalid X-User-Data header format")
         return None
 
@@ -61,7 +59,8 @@ def health_check(request):
 @api_view(['POST'])
 def verify_token(request):
     """Верификация токена пользователя (для Gateway)"""
-    if not verify_internal_key(request):
+    internal_key = request.headers.get('x-internal-key')
+    if not verify_internal_key(internal_key):
         return Response(
             {"error": "Unauthorized"}, 
             status=status.HTTP_401_UNAUTHORIZED
@@ -85,7 +84,8 @@ def verify_token(request):
 @api_view(['GET'])
 def service_info(request):
     """Информация о сервисе для Gateway"""
-    if not verify_internal_key(request):
+    internal_key = request.headers.get('x-internal-key')
+    if not verify_internal_key(internal_key):
         return Response(
             {"error": "Unauthorized"}, 
             status=status.HTTP_401_UNAUTHORIZED
@@ -119,7 +119,8 @@ def service_info(request):
 @api_view(['POST'])
 def kafka_status(request):
     """Статус Kafka интеграции"""
-    if not verify_internal_key(request):
+    internal_key = request.headers.get('x-internal-key')
+    if not verify_internal_key(internal_key):
         return Response(
             {"error": "Unauthorized"}, 
             status=status.HTTP_401_UNAUTHORIZED
@@ -136,7 +137,8 @@ def kafka_status(request):
 @api_view(['GET'])
 def service_metrics(request):
     """Метрики сервиса для мониторинга"""
-    if not verify_internal_key(request):
+    internal_key = request.headers.get('x-internal-key')
+    if not verify_internal_key(internal_key):
         return Response(
             {"error": "Unauthorized"}, 
             status=status.HTTP_401_UNAUTHORIZED

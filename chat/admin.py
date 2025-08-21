@@ -5,12 +5,12 @@ from .models import Conversation, Message, Setting, EmbeddingDocument, Prompt
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user_sub', 'org_id', 'topic', 'created_at')
+    list_display = ('id', 'sub', 'org_id', 'topic', 'created_at')
 
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user_sub', 'get_conversation_topic', 'message', 'is_bot', 'tokens','created_at')
+    list_display = ('id', 'sub', 'get_conversation_topic', 'message', 'is_bot', 'tokens','created_at')
 
     def get_conversation_topic(self, obj):
         return obj.conversation.topic
@@ -20,12 +20,12 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(EmbeddingDocument)
 class EmbeddingDocumentAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user_sub', 'org_id', 'title', 'created_at')
+    list_display = ('id', 'sub', 'org_id', 'title', 'created_at')
 
 
 @admin.register(Prompt)
 class PromptAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user_sub', 'title', 'created_at', 'updated_at')
+    list_display = ('id', 'sub', 'title', 'content', 'created_at')
 
 
 @admin.register(Setting)
