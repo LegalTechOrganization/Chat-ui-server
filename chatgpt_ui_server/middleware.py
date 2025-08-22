@@ -47,14 +47,8 @@ class UserIdMiddleware:
             request.jwt_payload = None
             logger.warning("❌ Middleware: Нет X-User-Data заголовка")
 
-        # Dev mock: подставляем фиктивные данные, если заголовки отсутствуют
-        use_mock = os.getenv('MOCK_AUTH', 'true').lower() == 'true'
-        if use_mock and not request.user_id:
-            request.user_id = '550e8400-e29b-41d4-a716-446655440000'
-            request.active_org_id = '123e4567-e89b-12d3-a456-426614174000'
-            request.user_email = 'user@example.com'
-            request.user_roles = ['member']
-            request.jwt_payload = None
-            logger.info("🔧 Middleware: Используются mock данные")
+        # Убираем mock логику - если нет токена, возвращаем 401
+        if not request.user_id:
+            logger.warning("❌ Middleware: Аутентификация не пройдена - нет валидного токена")
 
         return self.get_response(request)
