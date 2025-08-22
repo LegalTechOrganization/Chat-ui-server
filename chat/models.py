@@ -11,6 +11,7 @@ class EmbeddingDocument(models.Model):
     id = models.AutoField(primary_key=True)
     sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
     org_id = models.CharField(max_length=36, null=True, blank=True, db_index=True, help_text="Идентификатор организации")
+    document_id = models.IntegerField(default=0, help_text="Порядковый номер документа для пользователя")
     title = models.CharField(max_length=255, help_text="Заголовок документа")
     faiss_store = models.BinaryField(help_text="FAISS векторное хранилище")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -20,6 +21,7 @@ class EmbeddingDocument(models.Model):
         indexes = [
             models.Index(fields=['sub', 'created_at']),
             models.Index(fields=['sub', 'org_id']),
+            models.Index(fields=['sub', 'document_id']),
         ]
 
     def __str__(self):
@@ -57,7 +59,8 @@ class Message(models.Model):
     """
     id = models.AutoField(primary_key=True)
     sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
-    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    conversation = models.IntegerField(help_text="Порядковый номер беседы для пользователя (conversation_id)")
+    message_id = models.IntegerField(default=0, help_text="Порядковый номер сообщения для пользователя")
     message = models.TextField(help_text="Текст сообщения")
     is_bot = models.BooleanField(default=False, help_text="Сообщение от бота")
     message_type = models.IntegerField(default=0, help_text="Тип сообщения")
@@ -72,6 +75,7 @@ class Message(models.Model):
             models.Index(fields=['sub', 'created_at']),
             models.Index(fields=['sub', 'conversation']),
             models.Index(fields=['conversation', 'created_at']),
+            models.Index(fields=['sub', 'message_id']),
         ]
 
     def __str__(self):
@@ -84,6 +88,7 @@ class Prompt(models.Model):
     """
     id = models.AutoField(primary_key=True)
     sub = models.CharField(max_length=36, db_index=True, help_text="Уникальный идентификатор пользователя из JWT токена")
+    prompt_id = models.IntegerField(default=0, help_text="Порядковый номер промпта для пользователя")
     title = models.CharField(max_length=255, help_text="Заголовок промпта")
     content = models.TextField(help_text="Содержание промпта")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -92,6 +97,7 @@ class Prompt(models.Model):
         db_table = 'prompts'
         indexes = [
             models.Index(fields=['sub', 'created_at']),
+            models.Index(fields=['sub', 'prompt_id']),
         ]
 
     def __str__(self):

@@ -159,21 +159,45 @@ class MessageViewSet(viewsets.ModelViewSet):
         if user_sub:
             queryset = Message.objects.filter(sub=user_sub)
             if active_org_id:
-                queryset = queryset.filter(conversation__org_id=active_org_id)
+                # Для org_id нужно будет добавить логику, если потребуется
+                pass
             queryset = queryset.order_by('-created_at')
         conversationId = self.request.query_params.get('conversationId')
         if conversationId:
-            queryset = queryset.filter(conversation_id=conversationId).order_by('created_at')
+            queryset = queryset.filter(conversation=conversationId).order_by('created_at')
         return queryset
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
         # Используем внешний sub из middleware
         user_sub = getattr(request, 'user_id', None)
         if not user_sub:
             return Response({"error": "Authentication required. X-User-Data header with valid JWT token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Проверяем, передан ли conversation_id или conversation
+        conversation_id = request.data.get('conversation_id')
+        conversation_value = request.data.get('conversation')
+        
+        if conversation_id:
+            # Если передан conversation_id, проверяем что беседа существует
+            try:
+                Conversation.objects.get(sub=user_sub, conversation_id=conversation_id)
+                data = request.data.copy()
+                data['conversation'] = conversation_id
+            except Conversation.DoesNotExist:
+                return Response({"error": f"Conversation with conversation_id {conversation_id} not found for user"}, status=status.HTTP_404_NOT_FOUND)
+        elif conversation_value:
+            # Если передан conversation, интерпретируем его как conversation_id
+            try:
+                Conversation.objects.get(sub=user_sub, conversation_id=conversation_value)
+                data = request.data.copy()
+                data['conversation'] = conversation_value
+            except Conversation.DoesNotExist:
+                return Response({"error": f"Conversation with conversation_id {conversation_value} not found for user"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            data = request.data
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
         serializer.validated_data['sub'] = user_sub
 
         self.perform_create(serializer)
@@ -184,7 +208,84 @@ class MessageViewSet(viewsets.ModelViewSet):
         user_sub = getattr(self.request, 'user_id', None)
         if not user_sub:
             raise ValidationError({"error": "Authentication required. X-User-Data header with valid JWT token is required"})
-        serializer.save(sub=user_sub)
+        
+        # Получаем следующий message_id для пользователя
+        last_message = Message.objects.filter(sub=user_sub).order_by('-message_id').first()
+        next_message_id = 1 if not last_message else last_message.message_id + 1
+        
+        serializer.save(sub=user_sub, message_id=next_message_id)
+
+    def retrieve(self, request, *args, **kwargs):
+        """Получаем сообщение по message_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        message_id = kwargs.get('pk')
+        try:
+            message = Message.objects.get(sub=user_sub, message_id=message_id)
+            serializer = self.get_serializer(message)
+            return Response(serializer.data)
+        except Message.DoesNotExist:
+            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, *args, **kwargs):
+        """Обновляем сообщение по message_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        message_id = kwargs.get('pk')
+        try:
+            message = Message.objects.get(sub=user_sub, message_id=message_id)
+            serializer = self.get_serializer(message, data=request.data, partial=kwargs.get('partial', False))
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        except Message.DoesNotExist:
+            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, *args, **kwargs):
+        """Удаляем сообщение по message_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        message_id = kwargs.get('pk')
+        try:
+            message = Message.objects.get(sub=user_sub, message_id=message_id)
+            message.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Message.DoesNotExist:
+            return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['delete'])
+    def delete_all(self, request):
+        """Удаляем все сообщения конкретной беседы"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Получаем conversation_id из query параметров
+        conversation_id = request.query_params.get('conversationId')
+        if not conversation_id:
+            return Response({"error": "conversationId parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Проверяем, что беседа существует
+            Conversation.objects.get(sub=user_sub, conversation_id=conversation_id)
+            
+            # Удаляем все сообщения этой беседы
+            deleted_count = Message.objects.filter(sub=user_sub, conversation=conversation_id).delete()[0]
+            
+            return Response({
+                "deleted": True,
+                "conversation_id": conversation_id,
+                "deleted_count": deleted_count
+            }, status=status.HTTP_200_OK)
+            
+        except Conversation.DoesNotExist:
+            return Response({"error": f"Conversation with conversation_id {conversation_id} not found for user"}, status=status.HTTP_404_NOT_FOUND)
 
 
 class PromptViewSet(viewsets.ModelViewSet):
@@ -212,6 +313,61 @@ class PromptViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_create(self, serializer):
+        user_sub = getattr(self.request, 'user_id', None)
+        if not user_sub:
+            raise ValidationError({"error": "Authentication required. X-User-Data header with valid JWT token is required"})
+        
+        # Получаем следующий prompt_id для пользователя
+        last_prompt = Prompt.objects.filter(sub=user_sub).order_by('-prompt_id').first()
+        next_prompt_id = 1 if not last_prompt else last_prompt.prompt_id + 1
+        
+        serializer.save(sub=user_sub, prompt_id=next_prompt_id)
+
+    def retrieve(self, request, *args, **kwargs):
+        """Получаем промпт по prompt_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        prompt_id = kwargs.get('pk')
+        try:
+            prompt = Prompt.objects.get(sub=user_sub, prompt_id=prompt_id)
+            serializer = self.get_serializer(prompt)
+            return Response(serializer.data)
+        except Prompt.DoesNotExist:
+            return Response({"error": "Prompt not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, *args, **kwargs):
+        """Обновляем промпт по prompt_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        prompt_id = kwargs.get('pk')
+        try:
+            prompt = Prompt.objects.get(sub=user_sub, prompt_id=prompt_id)
+            serializer = self.get_serializer(prompt, data=request.data, partial=kwargs.get('partial', False))
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        except Prompt.DoesNotExist:
+            return Response({"error": "Prompt not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, *args, **kwargs):
+        """Удаляем промпт по prompt_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        prompt_id = kwargs.get('pk')
+        try:
+            prompt = Prompt.objects.get(sub=user_sub, prompt_id=prompt_id)
+            prompt.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Prompt.DoesNotExist:
+            return Response({"error": "Prompt not found"}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=False, methods=['delete'])
     def delete_all(self, request):
@@ -307,8 +463,57 @@ class EmbeddingDocumentViewSet(viewsets.ModelViewSet):
         # Set the `value` field on the serializer instance
         serializer.validated_data['faiss_store'] = faiss_store
 
+        # Получаем следующий document_id для пользователя
+        user_sub = getattr(self.request, 'user_id', None)
+        last_document = EmbeddingDocument.objects.filter(sub=user_sub).order_by('-document_id').first()
+        next_document_id = 1 if not last_document else last_document.document_id + 1
+        
         # Call the serializer's `save` method to create the new instance
-        serializer.save()
+        serializer.save(document_id=next_document_id)
+
+    def retrieve(self, request, *args, **kwargs):
+        """Получаем документ по document_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        document_id = kwargs.get('pk')
+        try:
+            document = EmbeddingDocument.objects.get(sub=user_sub, document_id=document_id)
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
+        except EmbeddingDocument.DoesNotExist:
+            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def update(self, request, *args, **kwargs):
+        """Обновляем документ по document_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        document_id = kwargs.get('pk')
+        try:
+            document = EmbeddingDocument.objects.get(sub=user_sub, document_id=document_id)
+            serializer = self.get_serializer(document, data=request.data, partial=kwargs.get('partial', False))
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        except EmbeddingDocument.DoesNotExist:
+            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, *args, **kwargs):
+        """Удаляем документ по document_id вместо id"""
+        user_sub = getattr(request, 'user_id', None)
+        if not user_sub:
+            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        document_id = kwargs.get('pk')
+        try:
+            document = EmbeddingDocument.objects.get(sub=user_sub, document_id=document_id)
+            document.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except EmbeddingDocument.DoesNotExist:
+            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
 
     def perform_update(self, serializer):
         faiss_store = self.get_embedding()
